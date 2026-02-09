@@ -3,6 +3,7 @@ using OpenTelemetry.Exporter;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using System.Diagnostics;
+using System.Net.Sockets;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -39,18 +40,192 @@ var tracesExporter = builder.Configuration["OTEL_TRACES_EXPORTER"]
     ?? Environment.GetEnvironmentVariable("OTEL_TRACES_EXPORTER") 
     ?? "otlp";
 
-// Parse the OTLP protocol
-var exporterProtocol = otlpProtocol.ToLowerInvariant() switch
+// ============================================================================
+// OTLP Exporter Configuration with Error Checking
+// ============================================================================
+
+var otlpConfigurationValid = true;
+var otlpConfigurationErrors = new List<string>();
+Uri? otlpEndpointUri = null;
+OtlpExportProtocol exporterProtocol = OtlpExportProtocol.Grpc;
+
+// Validate and parse the OTLP protocol
+Console.WriteLine();
+Console.WriteLine("╔══════════════════════════════════════════════════════════════════╗");
+Console.WriteLine("║           OpenTelemetry OTLP Exporter Configuration              ║");
+Console.WriteLine("╚══════════════════════════════════════════════════════════════════╝");
+Console.WriteLine();
+
+// Step 1: Validate protocol
+Console.WriteLine("[OTLP] Validating protocol configuration...");
+switch (otlpProtocol.ToLowerInvariant())
 {
-    "http/protobuf" => OtlpExportProtocol.HttpProtobuf,
-    "grpc" => OtlpExportProtocol.Grpc,
-    _ => OtlpExportProtocol.Grpc
-};
+    case "grpc":
+        exporterProtocol = OtlpExportProtocol.Grpc;
+        Console.WriteLine($"[OTLP] ✓ Protocol: gRPC");
+        break;
+    case "http/protobuf":
+        exporterProtocol = OtlpExportProtocol.HttpProtobuf;
+        Console.WriteLine($"[OTLP] ✓ Protocol: HTTP/Protobuf");
+        break;
+    default:
+        otlpConfigurationValid = false;
+        var protocolError = $"Invalid OTLP protocol '{otlpProtocol}'. Supported values: 'grpc', 'http/protobuf'";
+        otlpConfigurationErrors.Add(protocolError);
+        Console.WriteLine($"[OTLP] ✗ ERROR: {protocolError}");
+        break;
+}
+
+// Step 2: Validate endpoint URL format
+Console.WriteLine("[OTLP] Validating endpoint configuration...");
+if (string.IsNullOrWhiteSpace(otlpEndpoint))
+{
+    otlpConfigurationValid = false;
+    var endpointError = "OTLP endpoint is null or empty";
+    otlpConfigurationErrors.Add(endpointError);
+    Console.WriteLine($"[OTLP] ✗ ERROR: {endpointError}");
+}
+else if (!Uri.TryCreate(otlpEndpoint, UriKind.Absolute, out otlpEndpointUri))
+{
+    otlpConfigurationValid = false;
+    var endpointError = $"Invalid OTLP endpoint URL format: '{otlpEndpoint}'";
+    otlpConfigurationErrors.Add(endpointError);
+    Console.WriteLine($"[OTLP] ✗ ERROR: {endpointError}");
+}
+else
+{
+    // Validate URL scheme
+    if (otlpEndpointUri.Scheme != "http" && otlpEndpointUri.Scheme != "https")
+    {
+        otlpConfigurationValid = false;
+        var schemeError = $"Invalid URL scheme '{otlpEndpointUri.Scheme}'. Must be 'http' or 'https'";
+        otlpConfigurationErrors.Add(schemeError);
+        Console.WriteLine($"[OTLP] ✗ ERROR: {schemeError}");
+    }
+    else
+    {
+        Console.WriteLine($"[OTLP] ✓ Endpoint URL: {otlpEndpoint}");
+        Console.WriteLine($"[OTLP] ✓ Scheme: {otlpEndpointUri.Scheme}");
+        Console.WriteLine($"[OTLP] ✓ Host: {otlpEndpointUri.Host}");
+        Console.WriteLine($"[OTLP] ✓ Port: {otlpEndpointUri.Port}");
+    }
+
+    // Warn about common port misconfigurations
+    if (otlpConfigurationValid)
+    {
+        var expectedPort = exporterProtocol == OtlpExportProtocol.Grpc ? 4317 : 4318;
+        if (otlpEndpointUri.Port != expectedPort && otlpEndpointUri.Port != 80 && otlpEndpointUri.Port != 443)
+        {
+            Console.WriteLine($"[OTLP] ⚠ WARNING: Using port {otlpEndpointUri.Port}. " +
+                $"Standard port for {otlpProtocol} is {expectedPort}");
+        }
+
+        // For HTTP/Protobuf, check if path includes /v1/traces
+        if (exporterProtocol == OtlpExportProtocol.HttpProtobuf)
+        {
+            if (string.IsNullOrEmpty(otlpEndpointUri.AbsolutePath) || otlpEndpointUri.AbsolutePath == "/")
+            {
+                Console.WriteLine($"[OTLP] ⚠ WARNING: HTTP/Protobuf endpoint may need path '/v1/traces'. " +
+                    $"Current path: '{otlpEndpointUri.AbsolutePath}'");
+            }
+        }
+    }
+}
+
+// Step 3: Validate service name
+Console.WriteLine("[OTLP] Validating service name...");
+if (string.IsNullOrWhiteSpace(serviceName))
+{
+    otlpConfigurationValid = false;
+    var serviceNameError = "Service name is null or empty";
+    otlpConfigurationErrors.Add(serviceNameError);
+    Console.WriteLine($"[OTLP] ✗ ERROR: {serviceNameError}");
+}
+else if (serviceName.Length > 256)
+{
+    otlpConfigurationValid = false;
+    var serviceNameError = $"Service name exceeds maximum length of 256 characters (current: {serviceName.Length})";
+    otlpConfigurationErrors.Add(serviceNameError);
+    Console.WriteLine($"[OTLP] ✗ ERROR: {serviceNameError}");
+}
+else
+{
+    Console.WriteLine($"[OTLP] ✓ Service name: {serviceName}");
+}
+
+// Step 4: Test endpoint connectivity (non-blocking)
+if (otlpConfigurationValid && otlpEndpointUri != null)
+{
+    Console.WriteLine("[OTLP] Testing endpoint connectivity...");
+    try
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var tcpClient = new TcpClient();
+        
+        await tcpClient.ConnectAsync(otlpEndpointUri.Host, otlpEndpointUri.Port, cts.Token);
+        
+        if (tcpClient.Connected)
+        {
+            Console.WriteLine($"[OTLP] ✓ Successfully connected to {otlpEndpointUri.Host}:{otlpEndpointUri.Port}");
+        }
+    }
+    catch (OperationCanceledException)
+    {
+        Console.WriteLine($"[OTLP] ⚠ WARNING: Connection timeout to {otlpEndpointUri.Host}:{otlpEndpointUri.Port}. " +
+            "Endpoint may not be available. Traces will be queued and retried.");
+    }
+    catch (SocketException ex)
+    {
+        Console.WriteLine($"[OTLP] ⚠ WARNING: Cannot connect to {otlpEndpointUri.Host}:{otlpEndpointUri.Port}. " +
+            $"Socket error: {ex.SocketErrorCode}. Traces will be queued and retried.");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[OTLP] ⚠ WARNING: Connectivity test failed: {ex.Message}. " +
+            "Traces will be queued and retried.");
+    }
+}
+
+// Step 5: Print configuration summary
+Console.WriteLine();
+if (otlpConfigurationValid)
+{
+    Console.WriteLine("╔══════════════════════════════════════════════════════════════════╗");
+    Console.WriteLine("║        ✓ OTLP Exporter Configuration Successful                  ║");
+    Console.WriteLine("╚══════════════════════════════════════════════════════════════════╝");
+    Console.WriteLine();
+    Console.WriteLine($"  Service Name : {serviceName}");
+    Console.WriteLine($"  Endpoint     : {otlpEndpoint}");
+    Console.WriteLine($"  Protocol     : {otlpProtocol}");
+    Console.WriteLine($"  Exporters    : {tracesExporter}");
+    Console.WriteLine();
+}
+else
+{
+    Console.WriteLine("╔══════════════════════════════════════════════════════════════════╗");
+    Console.WriteLine("║        ✗ OTLP Exporter Configuration Failed                      ║");
+    Console.WriteLine("╚══════════════════════════════════════════════════════════════════╝");
+    Console.WriteLine();
+    Console.WriteLine("  The following errors were detected:");
+    foreach (var error in otlpConfigurationErrors)
+    {
+        Console.WriteLine($"    • {error}");
+    }
+    Console.WriteLine();
+    Console.WriteLine("  OTLP export will be disabled. Only console export will be active.");
+    Console.WriteLine();
+}
+
+// ============================================================================
+// Configure OpenTelemetry Services
+// ============================================================================
 
 // Create a custom ActivitySource for manual instrumentation
 var activitySource = new ActivitySource(serviceName);
-
 builder.Services.AddSingleton(activitySource);
+
+// Add HttpClientFactory for outgoing HTTP instrumentation
+builder.Services.AddHttpClient();
 
 // Configure OpenTelemetry
 builder.Services.AddOpenTelemetry()
@@ -65,11 +240,9 @@ builder.Services.AddOpenTelemetry()
             // Add automatic instrumentation for ASP.NET Core
             .AddAspNetCoreInstrumentation(options =>
             {
-                // Optionally filter out health check endpoints, etc.
                 options.Filter = httpContext => 
                     !httpContext.Request.Path.StartsWithSegments("/health");
                 
-                // Enrich spans with additional request information
                 options.EnrichWithHttpRequest = (activity, httpRequest) =>
                 {
                     activity.SetTag("http.request.header.host", httpRequest.Host.ToString());
@@ -88,28 +261,42 @@ builder.Services.AddOpenTelemetry()
             // Add our custom ActivitySource
             .AddSource(serviceName);
 
-        // Configure OTLP exporter
-        tracing.AddOtlpExporter(options =>
+        // Configure OTLP exporter only if configuration is valid
+        if (otlpConfigurationValid && otlpEndpointUri != null)
         {
-            options.Endpoint = new Uri(otlpEndpoint);
-            options.Protocol = exporterProtocol;
+            tracing.AddOtlpExporter(options =>
+            {
+                options.Endpoint = otlpEndpointUri;
+                options.Protocol = exporterProtocol;
+                options.TimeoutMilliseconds = 10000;
+                
+                // Configure batch export processor for better performance
+                options.BatchExportProcessorOptions = new BatchExportProcessorOptions<Activity>
+                {
+                    MaxQueueSize = 2048,
+                    ScheduledDelayMilliseconds = 5000,
+                    ExporterTimeoutMilliseconds = 30000,
+                    MaxExportBatchSize = 512
+                };
+            });
             
-            // Optional: Configure timeout and headers
-            options.TimeoutMilliseconds = 10000;
-            
-            // You can add headers for authentication if needed
-            // options.Headers = "api-key=your-api-key";
-        });
+            Console.WriteLine("[OTLP] ✓ OTLP exporter registered successfully");
+        }
+        else
+        {
+            Console.WriteLine("[OTLP] ✗ OTLP exporter not registered due to configuration errors");
+        }
 
-        // Optionally add console exporter for debugging
-        if (tracesExporter.Contains("console", StringComparison.OrdinalIgnoreCase))
+        // Add console exporter for debugging or as fallback
+        if (tracesExporter.Contains("console", StringComparison.OrdinalIgnoreCase) || !otlpConfigurationValid)
         {
             tracing.AddConsoleExporter();
+            Console.WriteLine("[OTLP] ✓ Console exporter registered" + 
+                (!otlpConfigurationValid ? " (fallback mode)" : ""));
         }
     });
 
-// Add HttpClientFactory for outgoing HTTP instrumentation
-builder.Services.AddHttpClient();
+Console.WriteLine();
 
 var app = builder.Build();
 
@@ -119,13 +306,12 @@ var app = builder.Build();
 
 app.MapGet("/", (ActivitySource source) =>
 {
-    // Create a custom span for additional context
     using var activity = source.StartActivity("HomePageRequest");
     activity?.SetTag("custom.tag", "homepage");
     activity?.AddEvent(new ActivityEvent("Rendering homepage"));
     
     return Results.Content(
-        GetHomePage(otlpEndpoint, otlpProtocol, serviceName),
+        GetHomePage(otlpEndpoint, otlpProtocol, serviceName, otlpConfigurationValid, otlpConfigurationErrors),
         "text/html");
 });
 
@@ -136,7 +322,6 @@ app.MapGet("/api/data", async (ActivitySource source, HttpContext context) =>
     activity?.SetTag("data.source", "internal");
     activity?.AddEvent(new ActivityEvent("Starting data fetch"));
     
-    // Simulate some work
     await Task.Delay(Random.Shared.Next(50, 200));
     
     activity?.AddEvent(new ActivityEvent("Data fetch complete"));
@@ -152,14 +337,15 @@ app.MapGet("/api/data", async (ActivitySource source, HttpContext context) =>
         {
             OtlpEndpoint = otlpEndpoint,
             OtlpProtocol = otlpProtocol,
-            ServiceName = serviceName
+            ServiceName = serviceName,
+            ConfigurationValid = otlpConfigurationValid
         }
     };
     
     return Results.Json(data);
 });
 
-app.MapGet("/api/external", async (ActivitySource source, IHttpClientFactory? httpClientFactory) =>
+app.MapGet("/api/external", async (ActivitySource source, IHttpClientFactory httpClientFactory) =>
 {
     using var activity = source.StartActivity("ExternalApiCall", ActivityKind.Client);
     
@@ -167,7 +353,7 @@ app.MapGet("/api/external", async (ActivitySource source, IHttpClientFactory? ht
     
     try
     {
-        using var httpClient = httpClientFactory?.CreateClient() ?? new HttpClient();
+        using var httpClient = httpClientFactory.CreateClient();
         httpClient.Timeout = TimeSpan.FromSeconds(10);
         
         activity?.AddEvent(new ActivityEvent("Making external request"));
@@ -208,6 +394,16 @@ app.MapGet("/api/error", (ActivitySource source) =>
     }
 });
 
+app.MapGet("/api/config", () => Results.Ok(new
+{
+    ServiceName = serviceName,
+    OtlpEndpoint = otlpEndpoint,
+    OtlpProtocol = otlpProtocol,
+    ConfigurationValid = otlpConfigurationValid,
+    ConfigurationErrors = otlpConfigurationErrors,
+    TracesExporter = tracesExporter
+}));
+
 app.MapGet("/health", () => Results.Ok(new { Status = "Healthy", Timestamp = DateTime.UtcNow }));
 
 app.Run();
@@ -216,20 +412,31 @@ app.Run();
 // Helper Methods
 // ============================================================================
 
-static string GetHomePage(string endpoint, string protocol, string serviceName) => $"""
+static string GetHomePage(string endpoint, string protocol, string serviceName, 
+    bool configValid, List<string> errors) => $"""
 <!DOCTYPE html>
 <html>
 <head>
     <title>OpenTelemetry OTLP Export Example</title>
 </head>
+
 <body>
     <h1>🔭 OpenTelemetry OTLP Export Example</h1>
     
-    <div class="config">
-        <h3>Current Configuration</h3>
+    <div class="config {(configValid ? "config-valid" : "config-invalid")}">
+        <h3>Configuration Status: 
+            <span class="status {(configValid ? "status-ok" : "status-error")}">
+                {(configValid ? "✓ Valid" : "✗ Invalid")}
+            </span>
+        </h3>
         <p><strong>Service Name:</strong> <code>{serviceName}</code></p>
         <p><strong>OTLP Endpoint:</strong> <code>{endpoint}</code></p>
         <p><strong>OTLP Protocol:</strong> <code>{protocol}</code></p>
+        {(errors.Count > 0 ? $@"
+        <h4>Configuration Errors:</h4>
+        <ul class=""error-list"">
+            {string.Join("\n", errors.Select(e => $"<li>{e}</li>"))}
+        </ul>" : "")}
     </div>
     
     <h3>Available Endpoints</h3>
@@ -237,6 +444,7 @@ static string GetHomePage(string endpoint, string protocol, string serviceName) 
         <li>📊 <a href="/api/data">/api/data</a> - Returns sample data with trace information</li>
         <li>🌐 <a href="/api/external">/api/external</a> - Makes an external HTTP call (demonstrates distributed tracing)</li>
         <li>❌ <a href="/api/error">/api/error</a> - Simulates an error (demonstrates error tracing)</li>
+        <li>⚙️ <a href="/api/config">/api/config</a> - Returns current OTLP configuration</li>
         <li>💚 <a href="/health">/health</a> - Health check endpoint (excluded from tracing)</li>
     </ul>
     
@@ -261,15 +469,13 @@ export OTEL_TRACES_EXPORTER=otlp,console
     <h3>Running with Jaeger (Example)</h3>
     <p>Start Jaeger with OTLP support:</p>
     <pre style="background: #333; color: #0f0; padding: 10px; border-radius: 4px;">
-docker run -d --name otel-lgtm \
-	-p 3000:3000 \
-	-p 4040:4040 \
-	-p 4317:4317 \
-	-p 4318:4318 \
-	-p 9090:9090 \
-  docker.io/grafana/otel-lgtm:latest
+docker run -d --name jaeger \
+  -p 16686:16686 \
+  -p 4317:4317 \
+  -p 4318:4318 \
+  jaegertracing/all-in-one:latest
     </pre>
-    <p>Then access OLTP UI at <a href="http://localhost:3000">http://localhost:3000</a></p>
+    <p>Then access Jaeger UI at <a href="http://localhost:16686">http://localhost:16686</a></p>
 </body>
 </html>
 """;

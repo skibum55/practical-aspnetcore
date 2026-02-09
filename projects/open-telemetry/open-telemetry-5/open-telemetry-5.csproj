@@ -5,6 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>opentelemetry_5</RootNamespace>
+    <!-- <IsPackable>true</IsPackable> -->
   </PropertyGroup>
 
   <ItemGroup>
