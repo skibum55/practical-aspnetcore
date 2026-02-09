@@ -1,7 +1,0 @@
-@model Cookies.Pages.Components.CookieControl
-
-@if(Model.ShowSetCookies){
-    <button class="btn btn-primary" on:click="@(() => Model.SetCookie())">Set New Cookie</button>
-}else{
-    <button class="btn btn-primary" on:click="@(() => Model.RemoveCookie())">Remove Cookie</button>
-}
