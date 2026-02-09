@@ -413,13 +413,44 @@ app.Run();
 // ============================================================================
 
 static string GetHomePage(string endpoint, string protocol, string serviceName, 
-    bool configValid, List<string> errors) => $"""
+    bool configValid, List<string> errors)
+{
+    var errorListHtml = errors.Count > 0 
+        ? $@"<h4>Configuration Errors:</h4>
+        <ul class=""error-list"">
+            {string.Join("\n", errors.Select(e => $"<li>{e}</li>"))}
+        </ul>" 
+        : "";
+
+    return $"""
 <!DOCTYPE html>
 <html>
 <head>
     <title>OpenTelemetry OTLP Export Example</title>
+    <style>
+        body  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+               max-width: 800px; margin: 50px auto; padding: 20px; 
+        h1  color: #333; 
+        .config  background: #f5f5f5; padding: 15px; border-radius: 8px; margin: 20px 0; 
+        .config code  background: #e0e0e0; padding: 2px 6px; border-radius: 4px; 
+        .config-valid  background: #d4edda; border: 1px solid #c3e6cb; 
+        .config-invalid  background: #f8d7da; border: 1px solid #f5c6cb; 
+        .endpoints  list-style: none; padding: 0; 
+        .endpoints li  margin: 10px 0; 
+        .endpoints a  color: #0066cc; text-decoration: none; 
+        .endpoints a:hover  text-decoration: underline; 
+        .env-vars  background: #fff3cd; padding: 15px; border-radius: 8px; margin: 20px 0; 
+        .env-vars pre  background: #333; color: #0f0; padding: 10px; border-radius: 4px; overflow-x: auto; 
+        .status  font-weight: bold; 
+        .status-ok  color: #28a745; 
+        .status-error  color: #dc3545; 
+        .error-list  color: #721c24; margin: 10px 0; padding-left: 20px; 
+        .docker-section  background: #e7f3ff; padding: 15px; border-radius: 8px; margin: 20px 0; border: 1px solid #b6d4fe; 
+        .ports-table  width: 100%; border-collapse: collapse; margin: 10px 0; 
+        .ports-table th, .ports-table td  border: 1px solid #ddd; padding: 8px; text-align: left; 
+        .ports-table th  background: #f8f9fa; 
+    </style>
 </head>
-
 <body>
     <h1>🔭 OpenTelemetry OTLP Export Example</h1>
     
@@ -432,11 +463,7 @@ static string GetHomePage(string endpoint, string protocol, string serviceName,
         <p><strong>Service Name:</strong> <code>{serviceName}</code></p>
         <p><strong>OTLP Endpoint:</strong> <code>{endpoint}</code></p>
         <p><strong>OTLP Protocol:</strong> <code>{protocol}</code></p>
-        {(errors.Count > 0 ? $@"
-        <h4>Configuration Errors:</h4>
-        <ul class=""error-list"">
-            {string.Join("\n", errors.Select(e => $"<li>{e}</li>"))}
-        </ul>" : "")}
+        {errorListHtml}
     </div>
     
     <h3>Available Endpoints</h3>
@@ -466,16 +493,89 @@ export OTEL_TRACES_EXPORTER=otlp,console
         </pre>
     </div>
     
-    <h3>Running with Jaeger (Example)</h3>
-    <p>Start Jaeger with OTLP support:</p>
-    <pre style="background: #333; color: #0f0; padding: 10px; border-radius: 4px;">
-docker run -d --name jaeger \
-  -p 16686:16686 \
+    <div class="docker-section">
+        <h3>🐳 Running with Grafana OTEL-LGTM Stack</h3>
+        <p>The <a href="https://github.com/grafana/docker-otel-lgtm" target="_blank">grafana/otel-lgtm</a> 
+           Docker image provides a complete OpenTelemetry backend for development and testing, 
+           including Prometheus (metrics), Tempo (traces), Loki (logs), and Grafana (visualization).</p>
+        
+        <h4>Quick Start (Docker CLI)</h4>
+        <pre style="background: #333; color: #0f0; padding: 10px; border-radius: 4px;">
+docker run --name otel-lgtm -d \
+  -p 3000:3000 \
   -p 4317:4317 \
   -p 4318:4318 \
-  jaegertracing/all-in-one:latest
-    </pre>
-    <p>Then access Jaeger UI at <a href="http://localhost:16686">http://localhost:16686</a></p>
+  grafana/otel-lgtm:latest
+        </pre>
+
+        <h4>Docker Compose</h4>
+        <pre style="background: #333; color: #0f0; padding: 10px; border-radius: 4px;">
+# docker-compose.yml
+version: "3"
+services:
+  otel-lgtm:
+    image: grafana/otel-lgtm:latest
+    container_name: otel-lgtm
+    ports:
+      - "3000:3000"   # Grafana UI
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+    volumes:
+      - lgtm-data:/data
+
+volumes:
+  lgtm-data:
+        </pre>
+
+        <h4>Port Reference</h4>
+        <table class="ports-table">
+            <tr>
+                <th>Port</th>
+                <th>Protocol</th>
+                <th>Description</th>
+            </tr>
+            <tr>
+                <td><code>3000</code></td>
+                <td>HTTP</td>
+                <td>Grafana UI - <a href="http://localhost:3000" target="_blank">http://localhost:3000</a></td>
+            </tr>
+            <tr>
+                <td><code>4317</code></td>
+                <td>gRPC</td>
+                <td>OTLP gRPC receiver (default for this app)</td>
+            </tr>
+            <tr>
+                <td><code>4318</code></td>
+                <td>HTTP</td>
+                <td>OTLP HTTP receiver (use with <code>http/protobuf</code> protocol)</td>
+            </tr>
+        </table>
+
+        <h4>Access Grafana</h4>
+        <p>
+            Navigate to <a href="http://localhost:3000" target="_blank">http://localhost:3000</a> 
+            and log in with:<br>
+            <strong>Username:</strong> <code>admin</code><br>
+            <strong>Password:</strong> <code>admin</code>
+        </p>
+        
+        <h4>View Traces in Grafana</h4>
+        <ol>
+            <li>Click on <strong>Explore</strong> in the sidebar</li>
+            <li>Select <strong>Tempo</strong> as the data source from the dropdown</li>
+            <li>Click <strong>Search</strong> to find traces</li>
+            <li>Or use <strong>TraceQL</strong> query: <code> resource.service.name = "{serviceName}" </code></li>
+        </ol>
+
+        <h4>Example: Using HTTP/Protobuf Protocol</h4>
+        <pre style="background: #333; color: #0f0; padding: 10px; border-radius: 4px;">
+# Use HTTP protocol instead of gRPC
+export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+dotnet run
+        </pre>
+    </div>
 </body>
 </html>
 """;
+}
