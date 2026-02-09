@@ -6,7 +6,8 @@ var builder = WebApplication.CreateBuilder();
 builder.Services.AddOpenTelemetry().WithTracing(b =>
 {
     b.SetResourceBuilder(ResourceBuilder.CreateDefault().AddService(builder.Environment.ApplicationName))
-     .AddHttpClientInstrumentation();
+     .AddHttpClientInstrumentation()
+     .UseOtlpExporter();
 });
 
 builder.Services.AddHttpClient();
