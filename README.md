@@ -2,7 +2,29 @@
 
 Forked from [github.com/dodyg/practical-aspnetcore](https://github.com/dodyg/practical-aspnetcore) for AI training on unit test creation.
 
-Start with the first [open telemetry](/projects/open-telemetry/open-telemetry-1/) project.  Once you have sufficient coverage (80-90%) move to the more complex projects in the higher numbered folders (2-5.)
+## Prerequisites
+
+- Dotnet SDK
+- Dotnet CLI
+- Visual Studio or VS Code (local or in a [Github Codespace](https://github.com/codespaces/))
+- Some experience [building, running and testing dotnet code](https://docs.github.com/en/actions/tutorials/build-and-test-code/net#building-and-testing-your-code)
+
+## Directions
+
+Clone this project to your local working directory and switch to the [open telemetry](/projects/open-telemetry) directory.  Review the build, run and test commands in the batch files there.
+
+Starting with the first [open telemetry](/projects/open-telemetry/open-telemetry-1/) project.  
+- Build and run the project.  
+- View the application web page on your local machine.
+- Provide your AI assistant with the below tools and rules.  
+- Create your tests with the AI assistant.
+- Review the tests, C# project changes and any generated chats.  
+- Run your tests. 
+- Have your assistant help you fix any failing tests.
+
+Once you have sufficient coverage (80-90%) move to the more complex projects in the higher numbered folders (2-5.)  Repeat the steps above.
+
+Note: ask your AI assistant to also run the tests once you are comfortable with the process.
 
 ## Our Testing Toolkit
 
@@ -20,7 +42,7 @@ Start with the first [open telemetry](/projects/open-telemetry/open-telemetry-1/
 6. **Arrange-Act-Assert** - Clear three-section structure in every test
 7. **CommitChanges after setup** - Call `Session.CommitChanges()` after creating test entities
 
-## Original README (Shortened)
+## Original README (Abridged)
 
 Greetings from Cairo, Egypt. You can [sponsor](https://github.com/sponsors/dodyg) this project [here](https://github.com/sponsors/dodyg). 
 
