@@ -19,7 +19,7 @@ Starting with the first [open telemetry](/projects/open-telemetry/open-telemetry
 - View the application web page on your local machine.
 - Provide your AI assistant with the below tools and rules.  
 - Create your tests with the AI assistant.
-- Review the tests, C# project changes and any generated chats.  
+- Review the tests, C# project & solution changes and any generated chats.  
 - Run your tests. 
 - Have your assistant help you fix any failing tests.
 
