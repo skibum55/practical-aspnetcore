@@ -6,7 +6,8 @@ Forked from [github.com/dodyg/practical-aspnetcore](https://github.com/dodyg/pra
 
 - Dotnet SDK
 - Dotnet CLI
-- Visual Studio or VS Code (local or in a [Github Codespace](https://github.com/codespaces/))
+- Visual Studio, VS Code (local or in a [Github Codespace](https://github.com/codespaces/)) or similar IDE
+- IDE integrated AI assistant like CoPilot, codex, etc.
 - Some experience [building, running and testing dotnet code](https://docs.github.com/en/actions/tutorials/build-and-test-code/net#building-and-testing-your-code)
 
 ## Directions
